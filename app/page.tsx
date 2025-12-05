@@ -1,65 +1,201 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import axios from 'axios';
+import { useAuth } from './contexts/AuthContext';
+
+interface Post {
+  id: number;
+  title: string;
+  excerpt: string;
+  author: string;
+  createdDate: string;
+  views?: number;
+}
+
+interface PostsResponse {
+  content: Post[];
+  totalPages: number;
+}
 
 export default function Home() {
+  const { isAuthenticated } = useAuth();
+  const router = useRouter();
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [sort, setSort] = useState('latest');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const cancelTokenSource = axios.CancelToken.source();
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data } = await axios.get<PostsResponse>('/api/posts/lists', {
+          params: {
+            page,
+            size: 10,
+            sort
+          },
+          headers: {
+            'Accept': 'application/json'
+          },
+          cancelToken: cancelTokenSource.token,
+          withCredentials: true
+        });
+
+        if (data.content.length > 0) {
+          setPosts(data.content);
+        } else {
+          throw new Error('empty');
+        }
+
+        if (data.totalPages) {
+          setTotalPages(data.totalPages);
+        }
+      } catch (e) {
+        if (!axios.isCancel(e)) {
+          // 401 Unauthorized 에러인 경우 로그인 메시지 표시
+          if (axios.isAxiosError(e) && e.response?.status === 401) {
+            setError('로그인 이후 사용해주세요');
+          } else if (e instanceof Error && e.message === 'empty') {
+            setError(null);
+          } else if (e instanceof Error) {
+            setError(e.message);
+          }
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelTokenSource.cancel('Component unmounted');
+    };
+  }, [page, sort]);
+
+  const formatDate = (d: string): string => {
+    if (!d) return '';
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return d;
+    return date.toLocaleDateString();
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="container my-4">
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h1 className="h3">게시물 목록</h1>
+      </div>
+
+      {loading && (
+        <div className="text-center py-5">
+          <div className="spinner-border" role="status">
+            <span className="visually-hidden">Loading...</span>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      )}
+
+      {error && (
+        <div className="alert alert-warning">
+          {error === '로그인 이후 사용해주세요' ? (
+            <>
+              <p className="mb-2">{error}</p>
+              <Link href="/login" className="btn btn-primary btn-sm">
+                로그인하러 가기
+              </Link>
+            </>
+          ) : (
+            <>API 오류: {error}</>
+          )}
         </div>
-      </main>
+      )}
+
+      <div className="mb-3 d-flex justify-content-end">
+        <select
+          className="form-select w-auto"
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+        >
+          <option value="latest">최신순</option>
+          <option value="oldest">과거순</option>
+          <option value="views">조회수순</option>
+        </select>
+      </div>
+
+      <ul className="list-group mb-3">
+        {posts.map(post => (
+          <li key={post.id} className="list-group-item d-flex justify-content-between align-items-start">
+            <div>
+              <h5 className="mb-1">{post.title}</h5>
+              <p className="mb-1 text-muted">{post.excerpt}</p>
+              <small className="text-muted">{post.author} • {formatDate(post.createdDate)}</small>
+            </div>
+            <Link href={`/posts/${post.id}`} className="btn btn-sm btn-primary ms-3">
+              보기
+            </Link>
+          </li>
+        ))}
+      </ul>
+
+      {/* page navigation */}
+      <div style={{ marginTop: '20px' }}>
+        <button disabled={page === 1} onClick={() => setPage(page - 1)}>
+          이전
+        </button>
+
+        {Array.from({ length: totalPages }, (_, i) => (
+          <button
+            key={i}
+            onClick={() => setPage(i + 1)}
+            style={{
+              fontWeight: page === i + 1 ? 'bold' : 'normal',
+              margin: '0 5px',
+            }}
+          >
+            {i + 1}
+          </button>
+        ))}
+
+        <button
+          disabled={page === totalPages}
+          onClick={() => setPage(page + 1)}
+        >
+          다음
+        </button>
+      </div>
+
+      {isAuthenticated && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '30px',
+            right: '30px',
+            zIndex: 1000
+          }}
+        >
+          <button
+            className="btn btn-primary"
+            onClick={() => router.push('/posts/write')}
+            style={{
+              borderRadius: '50%',
+              width: '60px',
+              height: '60px',
+              fontSize: '24px',
+              boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+            }}
+            title="글쓰기"
+          >
+            +
+          </button>
+        </div>
+      )}
     </div>
   );
 }

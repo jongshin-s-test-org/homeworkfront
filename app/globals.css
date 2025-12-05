@@ -5,6 +5,8 @@
   --foreground: #171717;
 }
 
+@import 'bootstrap/dist/css/bootstrap.min.css';
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
