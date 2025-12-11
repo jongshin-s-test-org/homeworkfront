@@ -9,13 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@ckeditor/ckeditor5-react": "^11.0.0",
+    "@iwanmastah/quill-table-better": "^1.4.0",
     "axios": "^1.13.2",
     "bootstrap": "^5.3.8",
-    "ckeditor5": "^47.3.0",
+    "github-markdown-css": "^5.8.1",
     "next": "16.0.7",
+    "quill-better-table": "^1.2.10",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "react-markdown": "^10.1.0",
+    "react-quill-new": "^3.6.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

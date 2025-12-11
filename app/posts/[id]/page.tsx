@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, FormEvent, JSX } from 'react';
+import { use, useState, useEffect, FormEvent, JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import axios from 'axios';
@@ -40,12 +40,13 @@ interface Comment {
 }
 
 interface PostDetailPageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 export default function PostDetailPage({ params }: PostDetailPageProps) {
+  const resolvedParams = use(params);
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
   const [post, setPost] = useState<Post | null>(null);
@@ -61,6 +62,14 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   const [deletingCommentId, setDeletingCommentId] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<'rendered' | 'html'>('rendered');
+
+  // HTML 엔티티 디코딩 함수
+  const decodeHTML = (html: string): string => {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = html;
+    return textarea.value;
+  };
 
   useEffect(() => {
     const cancelTokenSource = axios.CancelToken.source();
@@ -69,7 +78,7 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
       setLoading(true);
       setError(null);
       try {
-        const { data } = await axios.get<Post>(`/api/posts/${params.id}`, {
+        const { data } = await axios.get<Post>(`/api/posts/${resolvedParams.id}`, {
           headers: {
             'Accept': 'application/json'
           },
@@ -96,14 +105,14 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
       }
     }
 
-    if (params.id) {
+    if (resolvedParams.id) {
       load();
     }
 
     return () => {
       cancelTokenSource.cancel('Component unmounted');
     };
-  }, [params.id]);
+  }, [resolvedParams.id]);
 
   const handleDelete = async () => {
     if (!window.confirm('정말 삭제하시겠습니까?')) {
@@ -112,7 +121,7 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
 
     setDeleting(true);
     try {
-      await axios.delete(`/api/posts/${params.id}`, {
+      await axios.delete(`/api/posts/${resolvedParams.id}`, {
         withCredentials: true
       });
       router.push('/');
@@ -169,14 +178,14 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
   const isOwner = isAuthenticated && user && post && post.email === user.email;
 
   useEffect(() => {
-    if (!params.id) return;
+    if (!resolvedParams.id) return;
     const cancelSource = axios.CancelToken.source();
 
     async function loadComments() {
       setCommentsLoading(true);
       setCommentsError(null);
       try {
-        const { data } = await axios.get<Comment[]>(`/api/comments/${params.id}`, {
+        const { data } = await axios.get<Comment[]>(`/api/comments/${resolvedParams.id}`, {
           cancelToken: cancelSource.token,
           headers: { Accept: 'application/json' }
         });
@@ -192,14 +201,14 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
 
     loadComments();
     return () => cancelSource.cancel('Component unmounted');
-  }, [params.id]);
+  }, [resolvedParams.id]);
 
   const refreshComments = async () => {
-    if (!params.id) return;
+    if (!resolvedParams.id) return;
     setCommentsLoading(true);
     setCommentsError(null);
     try {
-      const { data } = await axios.get<Comment[]>(`/api/comments/${params.id}`, {
+      const { data } = await axios.get<Comment[]>(`/api/comments/${resolvedParams.id}`, {
         headers: { Accept: 'application/json' }
       });
       setComments(Array.isArray(data) ? data : []);
@@ -227,7 +236,7 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
       await axios.post('/api/comments', {
         description: commentDescription,
         email: user.email,
-        postId: params.id,
+        postId: resolvedParams.id,
         parentId: replyTarget ? getCommentId(replyTarget) : null,
         depth: commentDepth
       }, { withCredentials: true });
@@ -480,7 +489,7 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
   return (
     <div className="container my-4">
       <div className="mb-3">
-        <button className="btn btn-secondary" onClick={() => router.back()}>
+        <button className="btn btn-secondary" onClick={() => router.push("/")}>
           ← 뒤로가기
         </button>
       </div>
@@ -492,7 +501,7 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
             {isOwner && (
               <div className="d-flex gap-2">
                 <Link
-                  href={`/posts/${params.id}/edit`}
+                  href={`/posts/${resolvedParams.id}/edit`}
                   className="btn btn-outline-primary btn-sm"
                 >
                   수정
@@ -519,10 +528,44 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
 
         <div className="card">
           <div className="card-body">
-            <div 
-              className="post-content ck-content" 
-              dangerouslySetInnerHTML={{ __html: post.content || post.body || '내용이 없습니다.' }}
-            />
+            {/* HTML 뷰 모드 전환 버튼 */}
+            <div className="d-flex justify-content-end mb-3 gap-2">
+              <button
+                className={`btn btn-sm ${viewMode === 'rendered' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => setViewMode('rendered')}
+              >
+                에디터 보기
+              </button>
+              <button
+                className={`btn btn-sm ${viewMode === 'html' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => setViewMode('html')}
+              >
+                HTML 보기
+              </button>
+            </div>
+
+            {/* 콘텐츠 표시 */}
+            {viewMode === 'rendered' ? (
+              <div className="markdown-body">
+                <div
+                  className="ql-editor"
+                  dangerouslySetInnerHTML={{ __html: post.content ?? "" }}
+                />
+              </div>
+            ) : (
+              <div 
+                className="p-4 rounded"
+                style={{
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #dee2e6',
+                  minHeight: '400px',
+                  maxHeight: '800px',
+                  overflow: 'auto'
+                }}
+              >
+                <div dangerouslySetInnerHTML={{ __html: decodeHTML(post.content ?? "") }} />
+              </div>
+            )}
             
             {post.fileInfo && (
               <div className="mt-4 pt-3 border-top">
@@ -616,42 +659,42 @@ export default function PostDetailPage({ params }: PostDetailPageProps) {
       </section>
 
       <style>{`
-        .ck-content {
+        .ql-editor {
           line-height: 1.6;
         }
-        .ck-content h2 {
+        .ql-editor h2 {
           font-size: 1.75rem;
           margin-top: 1.5rem;
           margin-bottom: 1rem;
         }
-        .ck-content h3 {
+        .ql-editor h3 {
           font-size: 1.5rem;
           margin-top: 1.25rem;
           margin-bottom: 0.875rem;
         }
-        .ck-content p {
+        .ql-editor p {
           margin-bottom: 1rem;
         }
-        .ck-content ul, .ck-content ol {
+        .ql-editor ul, .ql-editor ol {
           margin-left: 1.5rem;
           margin-bottom: 1rem;
         }
-        .ck-content blockquote {
+        .ql-editor blockquote {
           border-left: 4px solid #ccc;
           padding-left: 1rem;
           margin: 1rem 0;
           color: #666;
         }
-        .ck-content table {
+        .ql-editor table {
           width: 100%;
           border-collapse: collapse;
           margin: 1rem 0;
         }
-        .ck-content table td, .ck-content table th {
+        .ql-editor table td, .ql-editor table th {
           border: 1px solid #ddd;
           padding: 0.5rem;
         }
-        .ck-content a {
+        .ql-editor a {
           color: #0d6efd;
           text-decoration: underline;
         }

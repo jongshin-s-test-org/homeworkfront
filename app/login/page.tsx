@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
+import { useState, useEffect, FormEvent, ChangeEvent, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import axios from 'axios';
@@ -11,7 +11,8 @@ interface LoginForm {
   password: string;
 }
 
-export default function LoginPage() {
+// LoginForm 컴포넌트 분리
+function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { login, isAuthenticated, isInitialized } = useAuth();
@@ -61,9 +62,41 @@ export default function LoginPage() {
       router.refresh();
     } catch (err) {
       let message = '로그인에 실패했습니다.';
+      
       if (axios.isAxiosError(err)) {
-        message = err.response?.data?.message || err.response?.data || err.message || message;
+        const responseData = err.response?.data;
+        
+        // 401 Unauthorized 에러인 경우
+        if (err.response?.status === 401) {
+          // 백엔드에서 "Login failed" 텍스트를 반환하는 경우
+          if (typeof responseData === 'string' && responseData.includes('Login failed')) {
+            message = '비밀번호가 올바르지 않습니다.';
+          } 
+          // Spring Boot 기본 에러 형식 {timestamp, status, error, path}
+          else if (responseData && typeof responseData === 'object') {
+            message = responseData.error || responseData.message || '비밀번호가 올바르지 않습니다.';
+          }
+          else {
+            message = '비밀번호가 올바르지 않습니다.';
+          }
+        } 
+        // 기타 에러
+        else {
+          // 객체인 경우 message 또는 error 속성 추출
+          if (responseData && typeof responseData === 'object') {
+            message = '이메일이 올바르지 않습니다.';
+          } 
+          // 문자열인 경우 그대로 사용
+          else if (typeof responseData === 'string') {
+            message = '이메일이 올바르지 않습니다.';
+          }
+          // 기타 경우 에러 메시지 사용
+          else {
+            message = '이메일이 올바르지 않습니다.';
+          }
+        }
       }
+      
       setError(message);
     } finally {
       setSubmitting(false);
@@ -120,5 +153,18 @@ export default function LoginPage() {
         </div>
       </form>
     </div>
+  );
+}
+
+// Suspense로 감싸서 export
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="container my-5" style={{ maxWidth: 420 }}>
+        <div className="text-center">로딩 중...</div>
+      </div>
+    }>
+      <LoginFormContent />
+    </Suspense>
   );
 }

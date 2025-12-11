@@ -1,11 +1,14 @@
 'use client';
 
-import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
+import { use, useState, useEffect, FormEvent, ChangeEvent, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import { useAuth } from '@/app/contexts/AuthContext';
-import { CKEditor } from '@ckeditor/ckeditor5-react';
-import { ClassicEditor } from 'ckeditor5';
+import dynamic from 'next/dynamic';
+import 'react-quill-new/dist/quill.snow.css';
+
+// React Quill을 동적으로 import (SSR 방지)
+const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 
 interface FormData {
   title: string;
@@ -26,12 +29,13 @@ interface ExistingFile {
 }
 
 interface PostEditPageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 export default function PostEditPage({ params }: PostEditPageProps) {
+  const resolvedParams = use(params);
   const router = useRouter();
   const { isAuthenticated, user } = useAuth();
   const [form, setForm] = useState<FormData>({
@@ -51,6 +55,7 @@ export default function PostEditPage({ params }: PostEditPageProps) {
     isRelease: '',
     file: ''
   });
+  const [quillReady, setQuillReady] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -59,13 +64,13 @@ export default function PostEditPage({ params }: PostEditPageProps) {
   }, [isAuthenticated, router]);
 
   useEffect(() => {
-    if (!params.id || !isAuthenticated) return;
+    if (!resolvedParams.id || !isAuthenticated) return;
 
     const loadPost = async () => {
       setLoading(true);
       setError(null);
       try {
-        const { data } = await axios.get(`/api/posts/${params.id}`, {
+        const { data } = await axios.get(`/api/posts/${resolvedParams.id}`, {
           withCredentials: true
         });
 
@@ -105,7 +110,126 @@ export default function PostEditPage({ params }: PostEditPageProps) {
     };
 
     loadPost();
-  }, [params.id, isAuthenticated, user]);
+  }, [resolvedParams.id, isAuthenticated, user]);
+
+  // Quill 모듈 설정
+  const modules = useMemo(() => ({
+    toolbar: {
+      container: [
+        [{ 'header': [1, 2, 3, false] }],
+        ['bold', 'italic', 'underline', 'strike'],
+        [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+        ['blockquote', 'code-block'],
+        [{ 'align': [] }],
+        ['link', 'image'],
+        [{ 'color': [] }, { 'background': [] }],
+        ['table'],
+        ['clean']
+      ],
+      handlers: {
+        table: function() {
+          const tableModule = (this as any).quill.getModule('table');
+          if (tableModule) {
+            tableModule.insertTable(3, 3);
+          }
+        }
+      }
+    },
+    table: true,
+  }), []);
+
+  const formats = [
+    'header',
+    'bold', 'italic', 'underline', 'strike',
+    'list',
+    'blockquote', 'code-block',
+    'align',
+    'link', 'image',
+    'color', 'background',
+    'table'
+  ];
+
+  // Quill 에디터가 로드된 후 테이블 모듈 등록
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !quillReady) {
+      import('react-quill-new').then((module) => {
+        const Quill = module.default.Quill;
+        if (Quill && !Quill.imports['modules/table']) {
+          // 기본 테이블 모듈 등록
+          const BlockEmbed = Quill.import('blots/block/embed') as any;
+          const Block = Quill.import('blots/block') as any;
+          
+          class TableCell extends Block {
+            static blotName = 'table-cell';
+            static tagName = 'TD';
+            
+            static create(value?: any) {
+              const node = super.create(value);
+              node.setAttribute('style', 'border: 1px solid #ddd; padding: 8px; min-width: 50px;');
+              return node;
+            }
+          }
+          
+          class TableRow extends Block {
+            static blotName = 'table-row';
+            static tagName = 'TR';
+          }
+          
+          class Table extends Block {
+            static blotName = 'table';
+            static tagName = 'TABLE';
+            
+            static create(value?: any) {
+              const node = super.create(value);
+              node.setAttribute('style', 'border-collapse: collapse; width: 100%; margin: 10px 0;');
+              return node;
+            }
+          }
+          
+          class TableBody extends Block {
+            static blotName = 'table-body';
+            static tagName = 'TBODY';
+          }
+          
+          Quill.register(TableCell);
+          Quill.register(TableRow);
+          Quill.register(Table);
+          Quill.register(TableBody);
+          
+          // 테이블 모듈
+          class TableModule {
+            quill: any;
+            
+            constructor(quill: any) {
+              this.quill = quill;
+            }
+            
+            insertTable(rows: number, cols: number) {
+              const range = this.quill.getSelection();
+              if (!range) return;
+              
+              let tableHTML = '<table border="1" style="border-collapse: collapse; width: 100%; margin: 10px 0;"><tbody>';
+              for (let i = 0; i < rows; i++) {
+                tableHTML += '<tr>';
+                for (let j = 0; j < cols; j++) {
+                  tableHTML += '<td style="border: 1px solid #ddd; padding: 8px; min-width: 50px;">Cell</td>';
+                }
+                tableHTML += '</tr>';
+              }
+              tableHTML += '</tbody></table><p><br></p>';
+              
+              const delta = this.quill.clipboard.convert(tableHTML);
+              this.quill.updateContents(delta, 'user');
+              this.quill.setSelection(range.index + 1, 0);
+            }
+          }
+          
+          Quill.register('modules/table', TableModule);
+        }
+        setQuillReady(true);
+      });
+    }
+  }, [quillReady]);
 
   const validateField = (name: keyof FormData, value: string | boolean): string => {
     let errorMessage = '';
@@ -130,8 +254,8 @@ export default function PostEditPage({ params }: PostEditPageProps) {
           errorMessage = '내용은 필수 입력값입니다.';
         } else if (trimmedContent.length < 5) {
           errorMessage = '내용은 5자 이상이어야 합니다.';
-        } else if (trimmedContent.length > 2000) {
-          errorMessage = '내용은 2000자 이하여야 합니다.';
+        } else if (trimmedContent.length > 60000) {
+          errorMessage = '내용은 60000자 이하여야 합니다.';
         }
         break;
 
@@ -164,14 +288,13 @@ export default function PostEditPage({ params }: PostEditPageProps) {
     }));
   };
 
-  const handleEditorChange = (event: any, editor: any) => {
-    const data = editor.getData();
+  const handleEditorChange = (value: string) => {
     setForm((prev) => ({
       ...prev,
-      content: data
+      content: value
     }));
 
-    const errorMessage = validateField('content', data);
+    const errorMessage = validateField('content', value);
     setFieldErrors((prev) => ({
       ...prev,
       content: errorMessage
@@ -297,7 +420,7 @@ export default function PostEditPage({ params }: PostEditPageProps) {
       }
 
       await axios.put(
-        `/api/posts/${params.id}`,
+        `/api/posts/${resolvedParams.id}`,
         formData,
         { 
           withCredentials: true,
@@ -306,7 +429,7 @@ export default function PostEditPage({ params }: PostEditPageProps) {
           }
         }
       );
-      router.push(`/posts/${params.id}`);
+      router.push(`/posts/${resolvedParams.id}`);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.data?.errors) {
         const backendErrors = err.response.data.errors;
@@ -368,161 +491,159 @@ export default function PostEditPage({ params }: PostEditPageProps) {
       <h1 className="h3 mb-4">게시물 수정</h1>
 
       <form onSubmit={handleSubmit} noValidate>
-        <div className="mb-3">
-          <label htmlFor="title" className="form-label">
-            제목 <span className="text-danger">*</span>
-          </label>
-          <input
-            id="title"
-            name="title"
-            type="text"
-            value={form.title}
-            onChange={handleChange}
-            onBlur={handleBlur}
-            className={`form-control ${fieldErrors.title ? 'is-invalid' : ''}`}
-            required
-            placeholder="제목을 입력하세요"
-            minLength={2}
-            maxLength={100}
-          />
-          {fieldErrors.title && (
-            <div className="invalid-feedback d-block">
-              {fieldErrors.title}
-            </div>
-          )}
-          <small className="form-text text-muted">
-            2~100자 사이로 입력해주세요. (현재: {form.title.trim().length}자)
-          </small>
-        </div>
+        <table className="table table-bordered">
+          <tbody>
+            <tr>
+              <th style={{ width: '150px', verticalAlign: 'middle', backgroundColor: '#f8f9fa' }}>
+                제목 <span className="text-danger">*</span>
+              </th>
+              <td>
+                <input
+                  id="title"
+                  name="title"
+                  type="text"
+                  value={form.title}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  className={`form-control ${fieldErrors.title ? 'is-invalid' : ''}`}
+                  required
+                  placeholder="제목을 입력하세요"
+                  minLength={2}
+                  maxLength={100}
+                />
+                {fieldErrors.title && (
+                  <div className="invalid-feedback d-block">
+                    {fieldErrors.title}
+                  </div>
+                )}
+                <small className="form-text text-muted">
+                  2~100자 사이로 입력해주세요. (현재: {form.title.trim().length}자)
+                </small>
+              </td>
+            </tr>
 
-        <div className="mb-4">
-          <label className="form-label">
-            내용 <span className="text-danger">*</span>
-          </label>
-          <CKEditor
-            editor={ClassicEditor}
-            data={form.content}
-            onChange={handleEditorChange}
-            disabled={submitting}
-            config={{
-              placeholder: '내용을 입력하세요 (최소 5자 이상)',
-              toolbar: [
-                'heading',
-                '|',
-                'bold',
-                'italic',
-                'link',
-                'bulletedList',
-                'numberedList',
-                '|',
-                'blockQuote',
-                'insertTable',
-                '|',
-                'undo',
-                'redo'
-              ]
-            }}
-          />
-          {fieldErrors.content && (
-            <div className="text-danger small mt-1">
-              {fieldErrors.content}
-            </div>
-          )}
-          <small className="form-text text-muted d-block mt-2">
-            5~2000자 사이로 입력해주세요.
-          </small>
-        </div>
+            <tr>
+              <th style={{ verticalAlign: 'top', paddingTop: '15px', backgroundColor: '#f8f9fa' }}>
+                내용 <span className="text-danger">*</span>
+              </th>
+              <td>
+                <ReactQuill
+                  theme="snow"
+                  value={form.content}
+                  onChange={handleEditorChange}
+                  modules={modules}
+                  formats={formats}
+                  placeholder="내용을 입력하세요 (최소 5자 이상)"
+                  style={{ height: '300px', marginBottom: '50px' }}
+                />
+                {fieldErrors.content && (
+                  <div className="text-danger small mt-1">
+                    {fieldErrors.content}
+                  </div>
+                )}
+                <small className="form-text text-muted d-block mt-2">
+                  5~60000자 사이로 입력해주세요. 테이블 버튼을 클릭하여 3x3 표를 삽입할 수 있습니다.
+                </small>
+              </td>
+            </tr>
 
-        <div className="mb-4">
-          <label htmlFor="file" className="form-label">
-            첨부파일
-          </label>
-          
-          {existingFile && !removeFile && (
-            <div className="alert alert-info d-flex justify-content-between align-items-center mb-2">
-              <div>
-                <strong>현재 파일:</strong> {existingFile.name}
-              </div>
-              <button
-                type="button"
-                className="btn btn-sm btn-outline-danger"
-                onClick={handleRemoveExistingFile}
-              >
-                삭제
-              </button>
-            </div>
-          )}
+            <tr>
+              <th style={{ verticalAlign: 'middle', backgroundColor: '#f8f9fa' }}>
+                첨부파일
+              </th>
+              <td>
+                {existingFile && !removeFile && (
+                  <div className="alert alert-info d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                      <strong>현재 파일:</strong> {existingFile.name}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-danger"
+                      onClick={handleRemoveExistingFile}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                )}
 
-          <input
-            id="file"
-            name="file"
-            type="file"
-            onChange={handleFileChange}
-            className={`form-control ${fieldErrors.file ? 'is-invalid' : ''}`}
-            disabled={submitting}
-            accept="image/*"
-          />
-          
-          {fieldErrors.file && (
-            <div className="invalid-feedback d-block">
-              {fieldErrors.file}
-            </div>
-          )}
-          
-          {selectedFile && !fieldErrors.file && (
-            <div className="alert alert-success d-flex justify-content-between align-items-center mt-2">
-              <div>
-                <strong>새 파일:</strong> {selectedFile.name} 
-                <span className="text-muted ms-2">
-                  ({(selectedFile.size / 1024).toFixed(2)} KB)
-                </span>
-              </div>
-              <button
-                type="button"
-                className="btn btn-sm btn-outline-danger"
-                onClick={handleRemoveFile}
-              >
-                제거
-              </button>
-            </div>
-          )}
-          
-          <small className="form-text text-muted d-block mt-2">
-            이미지 파일만 업로드 가능합니다. (최대 1MB, jpg/jpeg/png/gif/bmp/webp/svg)
-          </small>
-        </div>
+                <input
+                  id="file"
+                  name="file"
+                  type="file"
+                  onChange={handleFileChange}
+                  className={`form-control ${fieldErrors.file ? 'is-invalid' : ''}`}
+                  disabled={submitting}
+                  accept="image/*"
+                />
+                
+                {fieldErrors.file && (
+                  <div className="invalid-feedback d-block">
+                    {fieldErrors.file}
+                  </div>
+                )}
+                
+                {selectedFile && !fieldErrors.file && (
+                  <div className="alert alert-success d-flex justify-content-between align-items-center mt-2 mb-0">
+                    <div>
+                      <strong>새 파일:</strong> {selectedFile.name} 
+                      <span className="text-muted ms-2">
+                        ({(selectedFile.size / 1024).toFixed(2)} KB)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-danger"
+                      onClick={handleRemoveFile}
+                    >
+                      제거
+                    </button>
+                  </div>
+                )}
+                
+                <small className="form-text text-muted d-block mt-2">
+                  이미지 파일만 업로드 가능합니다. (최대 1MB, jpg/jpeg/png/gif/bmp/webp/svg)
+                </small>
+              </td>
+            </tr>
 
-        <div className="mb-4">
-          <label className="form-label">
-            공개 설정 <span className="text-danger">*</span>
-          </label>
-          <div className="btn-group" role="group" style={{ width: '100%' }}>
-            <button
-              type="button"
-              className={`btn ${form.isRelease ? 'btn-primary' : 'btn-outline-primary'}`}
-              onClick={() => handleReleaseToggle(true)}
-              disabled={submitting}
-            >
-              공개
-            </button>
-            <button
-              type="button"
-              className={`btn ${!form.isRelease ? 'btn-secondary' : 'btn-outline-secondary'}`}
-              onClick={() => handleReleaseToggle(false)}
-              disabled={submitting}
-            >
-              비공개
-            </button>
-          </div>
-          {fieldErrors.isRelease && (
-            <div className="text-danger small mt-1">
-              {fieldErrors.isRelease}
-            </div>
-          )}
-          <small className="form-text text-muted d-block mt-2">
-            {form.isRelease ? '모든 사용자가 게시글을 볼 수 있습니다.' : '나만 게시글을 볼 수 있습니다.'}
-          </small>
-        </div>
+            <tr>
+              <th style={{ verticalAlign: 'middle', backgroundColor: '#f8f9fa' }}>
+                공개 설정 <span className="text-danger">*</span>
+              </th>
+              <td>
+                <div className="btn-group" role="group">
+                  <button
+                    type="button"
+                    className={`btn ${form.isRelease ? 'btn-primary' : 'btn-outline-primary'}`}
+                    onClick={() => handleReleaseToggle(true)}
+                    disabled={submitting}
+                  >
+                    공개
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${!form.isRelease ? 'btn-secondary' : 'btn-outline-secondary'}`}
+                    onClick={() => handleReleaseToggle(false)}
+                    disabled={submitting}
+                  >
+                    비공개
+                  </button>
+                </div>
+                {fieldErrors.isRelease && (
+                  <div className="text-danger small mt-2">
+                    {fieldErrors.isRelease}
+                  </div>
+                )}
+                <div className="mt-2">
+                  <small className="form-text text-muted">
+                    {form.isRelease ? '모든 사용자가 게시글을 볼 수 있습니다.' : '나만 게시글을 볼 수 있습니다.'}
+                  </small>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
         {error && (
           <div className="alert alert-danger" role="alert">
@@ -548,6 +669,24 @@ export default function PostEditPage({ params }: PostEditPageProps) {
           </button>
         </div>
       </form>
+
+      <style jsx global>{`
+        .ql-snow .ql-editor table {
+          border-collapse: collapse;
+          width: 100%;
+        }
+        .ql-snow .ql-editor table td,
+        .ql-snow .ql-editor table th {
+          border: 1px solid #ddd;
+          padding: 8px;
+        }
+        .ql-snow .ql-editor table tr:nth-child(even) {
+          background-color: #f9f9f9;
+        }
+        .ql-snow .ql-editor table tr:hover {
+          background-color: #f5f5f5;
+        }
+      `}</style>
     </div>
   );
 }
