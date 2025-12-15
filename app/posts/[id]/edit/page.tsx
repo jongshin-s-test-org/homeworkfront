@@ -1,14 +1,20 @@
 'use client';
 
-import { use, useState, useEffect, FormEvent, ChangeEvent, useMemo } from 'react';
+import { use, useRef, useState, useEffect, FormEvent, ChangeEvent, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import { useAuth } from '@/app/contexts/AuthContext';
 import dynamic from 'next/dynamic';
 import 'react-quill-new/dist/quill.snow.css';
+import '@iwanmastah/quill-table-better/dist/quill-table-better.css'
+import { Quill } from 'react-quill-new';
 
-// React Quill을 동적으로 import (SSR 방지)
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
+
+import QuillBetterTable from '@iwanmastah/quill-table-better';
+Quill.register({
+  'modules/better-table': QuillBetterTable
+}, true);
 
 interface FormData {
   title: string;
@@ -55,7 +61,8 @@ export default function PostEditPage({ params }: PostEditPageProps) {
     isRelease: '',
     file: ''
   });
-  const [quillReady, setQuillReady] = useState(false);
+
+  const quillRef = useRef(null);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -113,30 +120,27 @@ export default function PostEditPage({ params }: PostEditPageProps) {
   }, [resolvedParams.id, isAuthenticated, user]);
 
   // Quill 모듈 설정
-  const modules = useMemo(() => ({
-    toolbar: {
-      container: [
-        [{ 'header': [1, 2, 3, false] }],
+  const modules = {
+    toolbar: [
+        // Other toolbar options
         ['bold', 'italic', 'underline', 'strike'],
+        [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
         [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-        ['blockquote', 'code-block'],
-        [{ 'align': [] }],
         ['link', 'image'],
-        [{ 'color': [] }, { 'background': [] }],
-        ['table'],
-        ['clean']
-      ],
-      handlers: {
-        table: function() {
-          const tableModule = (this as any).quill.getModule('table');
-          if (tableModule) {
-            tableModule.insertTable(3, 3);
+        // Table-specific buttons
+        [{ 'table': 'insertTable' }],
+    ],
+    'better-table': {
+      toolbar: true,
+      operationMenu: {
+        items: {
+          unmergeCells: {
+            text: 'Another unmerge cells name'
           }
         }
       }
     },
-    table: true,
-  }), []);
+  };
 
   const formats = [
     'header',
@@ -148,88 +152,6 @@ export default function PostEditPage({ params }: PostEditPageProps) {
     'color', 'background',
     'table'
   ];
-
-  // Quill 에디터가 로드된 후 테이블 모듈 등록
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !quillReady) {
-      import('react-quill-new').then((module) => {
-        const Quill = module.default.Quill;
-        if (Quill && !Quill.imports['modules/table']) {
-          // 기본 테이블 모듈 등록
-          const BlockEmbed = Quill.import('blots/block/embed') as any;
-          const Block = Quill.import('blots/block') as any;
-          
-          class TableCell extends Block {
-            static blotName = 'table-cell';
-            static tagName = 'TD';
-            
-            static create(value?: any) {
-              const node = super.create(value);
-              node.setAttribute('style', 'border: 1px solid #ddd; padding: 8px; min-width: 50px;');
-              return node;
-            }
-          }
-          
-          class TableRow extends Block {
-            static blotName = 'table-row';
-            static tagName = 'TR';
-          }
-          
-          class Table extends Block {
-            static blotName = 'table';
-            static tagName = 'TABLE';
-            
-            static create(value?: any) {
-              const node = super.create(value);
-              node.setAttribute('style', 'border-collapse: collapse; width: 100%; margin: 10px 0;');
-              return node;
-            }
-          }
-          
-          class TableBody extends Block {
-            static blotName = 'table-body';
-            static tagName = 'TBODY';
-          }
-          
-          Quill.register(TableCell);
-          Quill.register(TableRow);
-          Quill.register(Table);
-          Quill.register(TableBody);
-          
-          // 테이블 모듈
-          class TableModule {
-            quill: any;
-            
-            constructor(quill: any) {
-              this.quill = quill;
-            }
-            
-            insertTable(rows: number, cols: number) {
-              const range = this.quill.getSelection();
-              if (!range) return;
-              
-              let tableHTML = '<table border="1" style="border-collapse: collapse; width: 100%; margin: 10px 0;"><tbody>';
-              for (let i = 0; i < rows; i++) {
-                tableHTML += '<tr>';
-                for (let j = 0; j < cols; j++) {
-                  tableHTML += '<td style="border: 1px solid #ddd; padding: 8px; min-width: 50px;">Cell</td>';
-                }
-                tableHTML += '</tr>';
-              }
-              tableHTML += '</tbody></table><p><br></p>';
-              
-              const delta = this.quill.clipboard.convert(tableHTML);
-              this.quill.updateContents(delta, 'user');
-              this.quill.setSelection(range.index + 1, 0);
-            }
-          }
-          
-          Quill.register('modules/table', TableModule);
-        }
-        setQuillReady(true);
-      });
-    }
-  }, [quillReady]);
 
   const validateField = (name: keyof FormData, value: string | boolean): string => {
     let errorMessage = '';
@@ -527,22 +449,26 @@ export default function PostEditPage({ params }: PostEditPageProps) {
                 내용 <span className="text-danger">*</span>
               </th>
               <td>
-                <ReactQuill
-                  theme="snow"
-                  value={form.content}
-                  onChange={handleEditorChange}
-                  modules={modules}
-                  formats={formats}
-                  placeholder="내용을 입력하세요 (최소 5자 이상)"
-                  style={{ height: '300px', marginBottom: '50px' }}
-                />
+                <div className="editor-wrapper">
+                  <ReactQuill
+                    theme="snow"
+                    value={form.content}
+                    onChange={handleEditorChange}
+                    modules={modules}
+                    formats={formats}
+                    placeholder="내용을 입력하세요 (최소 5자 이상)"
+                    bounds="#editor-container"
+                    style={{ height: '300px', marginBottom: '50px' }}
+                  />
+                </div>
                 {fieldErrors.content && (
                   <div className="text-danger small mt-1">
                     {fieldErrors.content}
                   </div>
                 )}
                 <small className="form-text text-muted d-block mt-2">
-                  5~60000자 사이로 입력해주세요. 테이블 버튼을 클릭하여 3x3 표를 삽입할 수 있습니다.
+                  5~60000자 사이로 입력해주세요.<br/>
+                  <strong>테이블 사용법:</strong> 툴바의 테이블 버튼으로 표 삽입 후, 표 클릭 시 메뉴를 열 수 있습니다.
                 </small>
               </td>
             </tr>
@@ -685,6 +611,10 @@ export default function PostEditPage({ params }: PostEditPageProps) {
         }
         .ql-snow .ql-editor table tr:hover {
           background-color: #f5f5f5;
+        }
+        .editor-wrapper {
+          position: relative !important;
+          overflow: visible !important;
         }
       `}</style>
     </div>
