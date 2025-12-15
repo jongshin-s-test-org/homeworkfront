@@ -104,9 +104,14 @@ export default function PostWritePage() {
         break;
 
       case 'content':
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = value as string;
-        const textContent = tempDiv.textContent || tempDiv.innerText || '';
+        // const tempDiv = document.createElement('div');
+        // tempDiv.innerHTML = value as string;
+        // const textContent = tempDiv.textContent || tempDiv.innerText || '';
+        // const trimmedContent = textContent.trim();
+
+        const textContent = typeof value === 'string' 
+        ? value.replace(/<[^>]*>/g, '').trim() 
+        : '';
         const trimmedContent = textContent.trim();
         
         if (!trimmedContent) {
