@@ -1,4 +1,4 @@
-name: ci test
+name: cicd test
 
 on:
   push:
@@ -56,3 +56,34 @@ jobs:
 
       - name: Image digest
         run: echo ${{ steps.meta.outputs.digest }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: self-hosted
+    
+    steps:
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      
+      - name: Stop and remove old container
+        run: |
+          docker stop ${{ secrets.FRONT_DOCKER_CONTAINER_NAME }} || true
+          docker rm ${{ secrets.FRONT_DOCKER_CONTAINER_NAME }} || true
+      
+      - name: Pull latest image
+        run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+      
+      - name: Run new container
+        run: |
+          docker run -d \
+            --name ${{ secrets.FRONT_DOCKER_CONTAINER_NAME }} \
+            --restart unless-stopped \
+            --network ${{ secrets.DOCKER_NETWORK_NAME }}
+            -p 3000:3000 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+      
+      - name: Clean up old images
+        run: docker image prune -af
+      
+      - name: Check container status
+        run: docker ps | grep ${{ secrets.FRONT_DOCKER_CONTAINER_NAME }}
