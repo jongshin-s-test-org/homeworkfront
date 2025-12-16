@@ -78,7 +78,7 @@ jobs:
           docker run -d \
             --name ${{ secrets.FRONT_DOCKER_CONTAINER_NAME }} \
             --restart unless-stopped \
-            --network ${{ secrets.DOCKER_NETWORK_NAME }}
+            --network ${{ secrets.DOCKER_NETWORK_NAME }} \
             -p 3000:3000 \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
       
