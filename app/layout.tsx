@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
-import { AuthProvider } from './contexts/AuthContext';
-import Navbar from './components/Navbar';
-import './globals.css';
+import { AuthProvider } from '@/app/contexts/AuthContext';
+import Navbar from '@/app/components/Navbar';
+import '@/app/globals.css';
 
 export const metadata: Metadata = {
   title: '게시판',
